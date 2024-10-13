@@ -5,9 +5,11 @@
  * @format
  */
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, { useEffect, useState } from 'react';
+import type { PropsWithChildren } from 'react';
 import {
+  Modal,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -19,48 +21,94 @@ import {
 
 import {
   Colors,
-  DebugInstructions,
   Header,
-  LearnMoreLinks,
-  ReloadInstructions,
 } from 'react-native/Libraries/NewAppScreen';
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+import remoteConfig from '@react-native-firebase/remote-config';
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+const CURRENT_VERSION = "1.3.5";
 
 function App(): React.JSX.Element {
+
   const isDarkMode = useColorScheme() === 'dark';
 
   const backgroundStyle = {
     backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
   };
+
+  const [requiresForceUpdate, setRequiresForceUpdate] = useState<boolean | undefined>(false);
+  const [requiresOptionalUpdate, setRequiresOptionalUpdate] = useState<boolean | undefined>(false);
+
+  useEffect(() => {
+
+    remoteConfig().onConfigUpdated(_listener => {
+      let updatedKeys = _listener?.updatedKeys || [];
+      console.log("updatedKeys", updatedKeys);
+
+      updatedKeys.forEach(key => {
+        if (key === "update_versions") {
+          console.log("fetching new updated key")
+          remoteConfig().activate()
+          .then(val => {
+            const updates = remoteConfig().getValue('update_versions');
+            shouldPopUpdate(updates.asString());
+          })
+          .catch(err => console.log("err", err));
+        }
+      })
+
+    })
+
+    remoteConfig()
+      .setDefaults({
+        update_versions: "{\"force_updates\":[],\"optional_updates\":[]}",
+      })
+      .then(fetchAndActivate);
+
+    const updates = remoteConfig().getValue('update_versions');
+    shouldPopUpdate(updates.asString());
+  }, []);
+
+  function fetchAndActivate() {
+    remoteConfig().fetchAndActivate()
+      .then(fetchedRemotely => {
+        if (fetchedRemotely) {
+          console.log('Configs were retrieved from the backend and activated.');
+
+        } else {
+          console.log(
+            'No configs were fetched from the backend, and the local configs were already activated',
+          );
+          const updates = remoteConfig().getValue('update_versions');
+          shouldPopUpdate(updates.asString());
+        }
+      });
+  }
+
+  function shouldPopUpdate(updates: string) {
+    if (updates) {
+      let data = JSON.parse(updates);
+
+      let forceUpdates = data?.force_updates;
+      let optionalUpdates = data?.optional_updates;
+
+      console.log({
+        forceUpdates, optionalUpdates
+      });
+
+      if (forceUpdates || optionalUpdates) {
+
+        if (Array.isArray(forceUpdates) && forceUpdates.length && forceUpdates.includes(CURRENT_VERSION)) {
+          setRequiresForceUpdate(true)
+        } else if (Array.isArray(optionalUpdates) && optionalUpdates.length && optionalUpdates.includes(CURRENT_VERSION)) {
+          setRequiresOptionalUpdate(true)
+        } else {
+          setRequiresForceUpdate(false);
+          setRequiresOptionalUpdate(false);
+        }
+      }
+    }
+  }
 
   return (
     <SafeAreaView style={backgroundStyle}>
@@ -74,23 +122,37 @@ function App(): React.JSX.Element {
         <Header />
         <View
           style={{
+            flex: 1, justifyContent: "center", alignItems: "center",
             backgroundColor: isDarkMode ? Colors.black : Colors.white,
           }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
+          <Text>Hello CIBIL!</Text>
         </View>
+
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={requiresForceUpdate || requiresOptionalUpdate}
+          onRequestClose={() => {
+            setRequiresForceUpdate(undefined);
+            setRequiresOptionalUpdate(undefined);
+          }}>
+          <View style={styles.centeredView}>
+            <View style={styles.modalView}>
+              <Text style={styles.modalText}>
+                {`Requires ${requiresForceUpdate ? 'a Force' : 'an Optional'} update for version ${CURRENT_VERSION}`}
+              </Text>
+              <Pressable
+                style={[styles.button, styles.buttonClose]}
+                onPress={() => {
+                  setRequiresForceUpdate(false);
+                  setRequiresOptionalUpdate(false);
+                }}>
+                <Text style={styles.textStyle}>Hide Modal</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -112,6 +174,47 @@ const styles = StyleSheet.create({
   },
   highlight: {
     fontWeight: '700',
+  },
+  centeredView: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 22,
+  },
+  modalView: {
+    margin: 20,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 35,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  button: {
+    borderRadius: 20,
+    padding: 10,
+    elevation: 2,
+  },
+  buttonOpen: {
+    backgroundColor: '#F194FF',
+  },
+  buttonClose: {
+    backgroundColor: '#2196F3',
+  },
+  textStyle: {
+    color: 'white',
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  modalText: {
+    marginBottom: 15,
+    textAlign: 'center',
   },
 });
 
